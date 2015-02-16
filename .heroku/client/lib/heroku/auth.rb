@@ -13,6 +13,7 @@ class Heroku::Auth
 
     def api
       @api ||= begin
+        debug "Using API with key: #{password[0,6]}..."
         api = Heroku::API.new(default_params.merge(:api_key => password))
 
         def api.request(params, &block)
@@ -81,16 +82,14 @@ class Heroku::Auth
       get_credentials[1]
     end
 
-    def api_key(user=get_credentials[0], password=get_credentials[1], second_factor=nil)
-      params = default_params
-      if second_factor
-        params[:headers].merge!("Heroku-Two-Factor-Code" => second_factor)
-      end
-      api = Heroku::API.new(params)
-      api.post_login(user, password).body["api_key"]
+    def api_key(user=get_credentials[0], password=get_credentials[1])
+      @api ||= Heroku::API.new(default_params)
+      api_key = @api.post_login(user, password).body["api_key"]
+      @api = nil
+      api_key
     rescue Heroku::API::Errors::Forbidden => e
       if e.response.headers.has_key?("Heroku-Two-Factor-Required")
-        second_factor = ask_for_second_factor
+        ask_for_second_factor
         retry
       end
     rescue Heroku::API::Errors::Unauthorized => e
@@ -210,13 +209,14 @@ class Heroku::Auth
 
       print "Password (typing will be hidden): "
       password = running_on_windows? ? ask_for_password_on_windows : ask_for_password
+      HTTPInstrumentor.filter_parameter(password)
 
       [user, api_key(user, password)]
     end
 
     def ask_for_second_factor
       $stderr.print "Two-factor code: "
-      ask
+      api.second_factor = ask
     end
 
     def preauth
@@ -258,13 +258,16 @@ class Heroku::Auth
     end
 
     def ask_for_and_save_credentials
+      warn "WARNING: heroku-accounts plugin is installed. This plugin is known to have problems with HTTP Git." if defined?(Heroku::Command::Accounts)
       @credentials = ask_for_credentials
+      debug "Logged in as #{@credentials[0]} with key: #{@credentials[1][0,6]}..."
       write_credentials
       check
       @credentials
     rescue Heroku::API::Errors::NotFound, Heroku::API::Errors::Unauthorized => e
       delete_credentials
       display "Authentication failed."
+      warn "WARNING: HEROKU_API_KEY is set to an invalid key." if ENV['HEROKU_API_KEY']
       retry if retry_login?
       exit 1
     rescue => e
@@ -338,10 +341,6 @@ class Heroku::Auth
       @login_attempts < 3
     end
 
-    def verified_hosts
-      %w( heroku.com heroku-shadow.com )
-    end
-
     def base_host(host)
       parts = URI.parse(full_host(host)).host.split(".")
       return parts.first if parts.size == 1
@@ -353,23 +352,24 @@ class Heroku::Auth
     end
 
     def verify_host?(host)
-      hostname = base_host(host)
-      verified = verified_hosts.include?(hostname)
-      verified = false if ENV["HEROKU_SSL_VERIFY"] == "disable"
-      verified
+      return false if ENV["HEROKU_SSL_VERIFY"] == "disable"
+      base_host(host) == "heroku.com"
     end
 
     protected
 
     def default_params
       uri = URI.parse(full_host(host))
-      {
+      params = {
         :headers          => {'User-Agent' => Heroku.user_agent},
         :host             => uri.host,
         :port             => uri.port.to_s,
         :scheme           => uri.scheme,
         :ssl_verify_peer  => verify_host?(host)
       }
+      params[:instrumentor] = HTTPInstrumentor if debugging?
+
+      params
     end
   end
 end

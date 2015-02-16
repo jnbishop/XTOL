@@ -4,6 +4,7 @@ module Heroku
     extend self
 
     def home_directory
+      return Dir.home if defined? Dir.home # Ruby 1.9+
       running_on_windows? ? ENV['USERPROFILE'].gsub("\\","/") : ENV['HOME']
     end
 
@@ -30,6 +31,14 @@ module Heroku
 
     def deprecate(message)
       display "WARNING: #{message}"
+    end
+
+    def debug(*args)
+      $stderr.puts(*args) if debugging?
+    end
+
+    def debugging?
+      ENV['HEROKU_DEBUG']
     end
 
     def confirm(message="Are you sure you wish to continue? (y/n)")
@@ -528,11 +537,8 @@ module Heroku
       org?(email) ? email.gsub(/^(.*)@#{org_host}$/,'\1') : email
     end
 
-    def warn_if_netrc_does_not_have_https_git
-      unless Auth.netrc && Auth.netrc["git.heroku.com"]
-        warn "WARNING: Incomplete credentials detected, git may not work with Heroku. Run `heroku login` to update your credentials. See documentation for details: https://devcenter.heroku.com/articles/http-git#authentication"
-        exit 1
-      end
+    def has_http_git_entry_in_netrc
+      Auth.netrc && Auth.netrc[Auth.http_git_host]
     end
   end
 end

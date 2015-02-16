@@ -6,9 +6,11 @@
   ci = commit
   br = branch
   llog = log --date=local
+	co = checkou
 [rerere]
   enabled = true
 [user]
-	name = ABJORA
+	name = gavidon
+	email = georgeavidon@optonline.net
 [push]
 	default = matching

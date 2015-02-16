@@ -8,10 +8,13 @@ if File.exist?(Heroku::Updater.updating_lock_path) &&
   exit 1
 end
 
-require "heroku"
-require "heroku/command"
-require "heroku/helpers"
+require 'heroku'
+require 'heroku/command'
+require 'heroku/helpers'
+require 'heroku/http_instrumentor'
+require 'heroku/git'
 require 'rest_client'
+require 'multi_json'
 require 'heroku-api'
 
 begin
@@ -28,27 +31,23 @@ class Heroku::CLI
   extend Heroku::Helpers
 
   def self.start(*args)
-    begin
-      if $stdin.isatty
-        $stdin.sync = true
-      end
-      if $stdout.isatty
-        $stdout.sync = true
-      end
-      command = args.shift.strip rescue "help"
-      Heroku::Command.load
-      Heroku::Command.run(command, args)
-    rescue Interrupt => e
-      `stty icanon echo`
-      if ENV["HEROKU_DEBUG"]
-        styled_error(e)
-      else
-        error("Command cancelled.")
-      end
-    rescue => error
-      styled_error(error)
-      exit(1)
+    $stdin.sync = true if $stdin.isatty
+    $stdout.sync = true if $stdout.isatty
+    Heroku::Git.check_git_version
+    command = args.shift.strip rescue "help"
+    Heroku::Command.load
+    Heroku::Command.run(command, args)
+    Heroku::Updater.autoupdate
+  rescue Interrupt => e
+    `stty icanon echo`
+    if ENV["HEROKU_DEBUG"]
+      styled_error(e)
+    else
+      error("Command cancelled.")
     end
+  rescue => error
+    styled_error(error)
+    exit(1)
   end
 
 end
